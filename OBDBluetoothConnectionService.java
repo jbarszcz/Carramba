@@ -13,6 +13,7 @@ import com.github.pires.obd.commands.engine.MassAirFlowCommand;
 import com.github.pires.obd.commands.engine.RPMCommand;
 import com.github.pires.obd.commands.fuel.ConsumptionRateCommand;
 import com.github.pires.obd.commands.protocol.*;
+import com.github.pires.obd.commands.temperature.EngineCoolantTemperatureCommand;
 import com.github.pires.obd.enums.ObdProtocols;
 
 import java.io.IOException;
@@ -20,6 +21,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class OBDBluetoothConnectionService {
     private static final String TAG = "CARRABMA: BTService";
@@ -35,7 +37,7 @@ public class OBDBluetoothConnectionService {
     private InputStream btInputStream;
     private OutputStream btOutputStream;
 
-    private boolean gatherData = false;
+    private AtomicBoolean gatherData = new AtomicBoolean();
 
 
     public OBDBluetoothConnectionService(Context mContext) {
@@ -72,7 +74,7 @@ public class OBDBluetoothConnectionService {
 
         public void run() {
             try {
-                gatherData = true;
+                gatherData.set(true);
                 socket.connect();
                 btInputStream = socket.getInputStream();
                 btOutputStream = socket.getOutputStream();
@@ -82,6 +84,7 @@ public class OBDBluetoothConnectionService {
                 LocalBroadcastManager.getInstance(mContext).sendBroadcast(connectedIntent);
                 startOBDCommunication(socket);
                 lanuchDataGatheringLoop();
+                Log.d(TAG, "run: WYJSCIE Z PETLI!");
                 socket.close();
 
             } catch (IOException e) {
@@ -93,7 +96,7 @@ public class OBDBluetoothConnectionService {
 
         private void cancel() {
             try {
-                gatherData = false;
+                gatherData.set(false);
             } catch (Exception e) {
                 sendErrorBroadcast(e.getMessage());
                 e.printStackTrace();
@@ -115,14 +118,12 @@ public class OBDBluetoothConnectionService {
         SpeedCommand speedCommand = new SpeedCommand();
         RPMCommand rpmCommand = new RPMCommand();
         ConsumptionRateCommand consumptionRateCommmand = new ConsumptionRateCommand();
-        MassAirFlowCommand massAirFlowCommand = new MassAirFlowCommand();
-        ConsumptionRateCommand consumptionRateCommand = new ConsumptionRateCommand();
+        EngineCoolantTemperatureCommand engineCoolantTemperatureCommand = new EngineCoolantTemperatureCommand();
 
         commandsList = new ArrayList<>();
         commandsList.add(speedCommand);
         commandsList.add(rpmCommand);
-        commandsList.add(massAirFlowCommand);
-        commandsList.add(consumptionRateCommand);
+        commandsList.add(engineCoolantTemperatureCommand);
 
 
     }
@@ -146,7 +147,7 @@ public class OBDBluetoothConnectionService {
     }
 
     private void lanuchDataGatheringLoop() {
-        while (gatherData) {
+        while (gatherData.get()) {
             try {
                 Thread.sleep(500);
             } catch (Exception e) {
@@ -173,6 +174,8 @@ public class OBDBluetoothConnectionService {
             LocalBroadcastManager.getInstance(mContext).sendBroadcast(dataReadedIntent);
 
         }
+
+
     }
 
     private void sendErrorBroadcast(String errorMessage) {

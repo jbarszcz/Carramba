@@ -34,6 +34,6 @@ public class Utils {
 
         //return data;
 
-        return new JSONObject("{\"data\": [{\"datetime\": \"\",\"tripNumber\": 1,\"speed\": 0, \"rpm\": 0, \"longitude\": 0,\"latitude\": 0,\"fuelConsumption\": 20}]}");
+        return new JSONObject("{\"data\": [{}]}");
     }
 }

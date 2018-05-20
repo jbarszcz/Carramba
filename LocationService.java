@@ -37,7 +37,7 @@ class LocationService {
             @Override
             public void onLocationResult(LocationResult locationResult) {
                 if (locationResult == null) {
-                    Log.d(TAG, "onLocationResult: dupxo");
+                    Log.d(TAG, "onLocationResult: location result null");
                     return;
 
                 }
@@ -72,12 +72,12 @@ class LocationService {
                     public void onSuccess(Location location) {
                         // Got last known location. In some rare situations this can be null.
                         if (location != null) {
-                            Log.d(TAG, "onSuccess: UDALO SIE");
+                            Log.d(TAG, "onSuccess: Location update");
                             mLocation = location;
                             sendLocationBroadcast();
 
                         } else {
-                            Log.d(TAG, "onSuccess: nie udalo sie");
+                            Log.d(TAG, "onSuccess: Location null");
                         }
 
                     }

@@ -9,6 +9,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.graphics.Color;
+import android.location.LocationManager;
 import android.os.Bundle;
 import android.support.v4.content.LocalBroadcastManager;
 import android.support.v7.app.AlertDialog;
@@ -21,14 +22,11 @@ import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import com.google.android.gms.location.LocationCallback;
-
 import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.Set;
-import java.util.concurrent.ExecutionException;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -41,10 +39,15 @@ public class MainActivity extends AppCompatActivity {
 
     private int tripNumber;
 
+    private JSONObject batch;
+    private static final int batchSize = 10;
+    private int batchCounter;
+
     BluetoothAdapter mBluetoothAdapter;
     OBDBluetoothConnectionService btConnectionService;
     ServerUploadService serverUploadService;
     LocationService locationService;
+    LocationManager mLocationManager;
 
     TextView connectedText;
     TextView serverResponseText;
@@ -52,17 +55,19 @@ public class MainActivity extends AppCompatActivity {
     TextView speedText;
     TextView rpmText;
     TextView fuelText;
-    TextView errorText;
+    TextView temperatureText;
+    TextView logText;
     Button mainButton;
-
-    LocationCallback mLocationCallback;
 
 
     private boolean connected = false;
 
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        mLocationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+
         setContentView(R.layout.activity_main);
         mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
         btConnectionService = new OBDBluetoothConnectionService(getApplicationContext());
@@ -71,7 +76,7 @@ public class MainActivity extends AppCompatActivity {
 
         loadUI();
         registerBroadcastReceivers();
-
+        resetJsonBatch();
 
 
     }
@@ -79,23 +84,27 @@ public class MainActivity extends AppCompatActivity {
     private void registerBroadcastReceivers() {
         LocalBroadcastManager.getInstance(this).registerReceiver(readDataBroadcastReceiver, new IntentFilter("dataReaded"));
         LocalBroadcastManager.getInstance(this).registerReceiver(errorBroadcastReceiver, new IntentFilter("error"));
+        LocalBroadcastManager.getInstance(this).registerReceiver(infoBroadcastReceiver, new IntentFilter("info"));
         LocalBroadcastManager.getInstance(this).registerReceiver(connectedBroadcastReceiver, new IntentFilter("connectedToObd2"));
         LocalBroadcastManager.getInstance(this).registerReceiver(locationChangedReceiver, new IntentFilter("location"));
+        getApplicationContext().registerReceiver(m_gpsChangeReceiver, new IntentFilter(LocationManager.PROVIDERS_CHANGED_ACTION));
+
         registerReceiver(disconnectedBroadcastReceiver, new IntentFilter(BluetoothDevice.ACTION_ACL_DISCONNECTED));
     }
 
     private void loadUI() {
         connectedText = (TextView) findViewById(R.id.connection_text_view);
         serverResponseText = (TextView) findViewById(R.id.server_response_text_view);
-        locationText = (TextView)findViewById(R.id.location_text_view);
+        locationText = (TextView) findViewById(R.id.location_text_view);
         speedText = (TextView) findViewById(R.id.speed_text_view);
         rpmText = (TextView) findViewById(R.id.rpm_text_view);
         fuelText = (TextView) findViewById(R.id.fuel_text_view);
+        temperatureText = (TextView) findViewById(R.id.temperature_text_view);
 
 
-        errorText = (TextView) findViewById(R.id.error_text_view);
-        errorText.setTextColor(Color.RED);
-        errorText.setMovementMethod(new ScrollingMovementMethod());
+        logText = (TextView) findViewById(R.id.error_text_view);
+        logText.setTextColor(Color.RED);
+        logText.setMovementMethod(new ScrollingMovementMethod());
 
         mainButton = (Button) findViewById(R.id.btnMainButton);
     }
@@ -114,37 +123,49 @@ public class MainActivity extends AppCompatActivity {
 
 
             String readedSpeed = intent.getStringExtra("Vehicle Speed");
-
             String readedRpm = intent.getStringExtra("Engine RPM");
-            String readedFuel = intent.getStringExtra("Mass Air Flow");
-            updateData(readedSpeed, readedRpm, readedFuel);
+            String readedTemperature = intent.getStringExtra("Engine Coolant Temperature");
+            String readedFuel = calculateFuelConsumption(readedRpm);
+            updateData(readedSpeed, readedRpm, readedFuel, readedTemperature);
 
-            String jsonString = "";
-            JSONObject emptyJson = null;
+            String jsonString;
+            JSONObject emptyJson;
+
             try {
-                emptyJson = Utils.createEmptyJsonObject();
+
+                emptyJson = new JSONObject();
 
                 locationService.updateLocation();
                 String longitude = locationService.getLongitude();
                 String latitude = locationService.getLatitude();
 
-                emptyJson.getJSONArray("data").getJSONObject(0).put("tripNumber", tripNumber);
-                emptyJson.getJSONArray("data").getJSONObject(0).put("longitude",  Double.parseDouble(longitude));
-                emptyJson.getJSONArray("data").getJSONObject(0).put("latitude",  Double.parseDouble(latitude));
-                emptyJson.getJSONArray("data").getJSONObject(0).put("speed", readedSpeed);
-                emptyJson.getJSONArray("data").getJSONObject(0).put("datetime", Utils.getCurrentTimeStamp());
+                //lol, przeciez to wysyla tylko ostatni json xD
 
-                jsonString = emptyJson.toString();
+                emptyJson.put("tripNumber", tripNumber);
+                emptyJson.put("longitude", Double.parseDouble(longitude));
+                emptyJson.put("latitude", Double.parseDouble(latitude));
+                emptyJson.put("speed", Double.parseDouble(readedSpeed));
+                emptyJson.put("rpm", Integer.parseInt(readedRpm));
+                emptyJson.put("temperature", Double.parseDouble(readedTemperature));
+                emptyJson.put("fuelConsumption", Double.parseDouble(readedFuel));
+                emptyJson.put("datetime", Utils.getCurrentTimeStamp());
+
+                batch.getJSONArray("data").put(emptyJson);
+
+
+
+                jsonString = batch.toString();
                 System.out.println(jsonString);
+
+                batchCounter++;
+                if (batchCounter == batchSize) {
+                    Log.d(TAG, "onReceive: batch counter reached, uploading data to server");
+                    uploadDataToServer(jsonString);
+                    resetJsonBatch();
+                }
 
 
             } catch (JSONException e) {
-                e.printStackTrace();
-            }
-
-            try {
-                //uploadDataToServer(jsonString);
-            } catch (Exception e) {
                 e.printStackTrace();
             }
 
@@ -156,13 +177,23 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onReceive(Context context, Intent intent) {
             String error = intent.getStringExtra("error");
-            //TODO zrobić żeby to były takie logi, w sensie żeby errory się dopisywały a nie nadpisywały
-            // w ogóle możnaby zrobić logi takie po prostu
-            errorText.append(error + "\n");
-            errorText.setText(error + "\n" + errorText.getText());
+            logText.append(error + "\n");
+            logText.setText(Utils.getCurrentTimeStamp() + ": " + error + "\n" + logText.getText());
 
         }
     };
+
+    private final BroadcastReceiver infoBroadcastReceiver = new BroadcastReceiver() {
+
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String info = intent.getStringExtra("info");
+            logText.append(info + "\n");
+            logText.setText(Utils.getCurrentTimeStamp() + ": " + info);
+
+        }
+    };
+
 
     private final BroadcastReceiver locationChangedReceiver = new BroadcastReceiver() {
         @Override
@@ -207,6 +238,25 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
+    private final BroadcastReceiver m_gpsChangeReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (!mLocationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                Toast gpsTurnedOff = Toast.makeText(
+                        getApplicationContext(),
+                        "GPS turned off.",
+                        Toast.LENGTH_SHORT);
+                gpsTurnedOff.show();
+
+
+            }
+            if (connected) {
+                btConnectionService.stopConnection();
+            }
+
+        }
+    };
+
 
     public void mainButtonClicked(View view) {
 
@@ -218,8 +268,17 @@ public class MainActivity extends AppCompatActivity {
             );
             btNotEnabledToast.show();
 
+
+        } else if (!mLocationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+            Toast gpsNotEnabledToast = Toast.makeText(
+                    getApplicationContext(),
+                    "GPS is not enabled.",
+                    Toast.LENGTH_SHORT
+            );
+            gpsNotEnabledToast.show();
         } else if (connected) {
             btConnectionService.stopConnection();
+            Log.d(TAG, "mainButtonClicked: Disconnecting");
 
         } else {
             updateTripNumber();
@@ -266,57 +325,33 @@ public class MainActivity extends AppCompatActivity {
 
 
     //TODO stworzyc obiekt do rozmowy z obd2?
-    public void updateData(String readedSpeed, String readedRPM, String readedMassAirFlow) {
+    public void updateData(String readedSpeed, String readedRPM, String fuelConsumption, String readedTemperature) {
         Log.i(TAG, "updateData: data updated");
 
-        speedText.setText("Speed: " + readedSpeed);
+        speedText.setText("Speed: " + readedSpeed + " km//h");
         rpmText.setText("RPM " + readedRPM);
+        temperatureText.setText("Engine temperature: " + readedTemperature + " C");
 
-//        StringBuilder fuel = new StringBuilder();
-//        fuel.append("Fuel consumption: ");
-//        fuel.append(readedFuel);
-//        fuelText.setText(fuel);
-        StringBuilder fuel = new StringBuilder();
-        if (!readedMassAirFlow.equals(" - ")) {
-
-
-            String mafString = readedMassAirFlow;
-            double MAF = Double.parseDouble(mafString.replaceAll(",", "."));
-
-            String vsString = readedSpeed;
-            double VS = Double.parseDouble(vsString.replaceAll(",", "."));
-
-            double fuelRate = ((MAF / 14.7) * 1.3245 * 3600) * 100 / (1000 * VS);
-            // Log.i(TAG, "updateData: " + fuelRate);
-
-
-            fuel.append("Fuel Consumption: ");
-            fuel.append(String.valueOf(fuelRate));
-
-
-        } else {
-            fuel.append("Fuel Consumption -");
-
-
-        }
-        fuelText.setText(fuel);
+        fuelText.setText("Fuel consumption " + fuelConsumption + " l/100km");
 
     }
 
     private void uploadDataToServer(String jsonData) {
         HttpAsyncTask asyncTask = new HttpAsyncTask(serverUploadService, jsonData);
         try {
-            String serverResponse = asyncTask.execute().get();
-            Log.d(TAG, "uploadDataToServer: " + serverResponse);
-            serverResponseText.setText(serverResponse);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        } catch (ExecutionException e) {
-            e.printStackTrace();
+            asyncTask.execute();
+//            Log.d(TAG, "uploadDataToServer: " + serverResponse);
+//            serverResponseText.setText(serverResponse);
+//            Log.d(TAG, "uploadDataToServer: Server response: " + serverResponse);
         }
-    }
+            catch (Exception e)
+            {
+                asyncTask.sendErrorBroadcast(e.getMessage());
+            }
+        }
 
-    private void updateTripNumber(){
+
+    private void updateTripNumber() {
         SharedPreferences preferences = getPreferences(MODE_PRIVATE);
         int oldTripNumber = preferences.getInt("tripNumber", 1);
 
@@ -324,8 +359,31 @@ public class MainActivity extends AppCompatActivity {
         preferences.edit().putInt("tripNumber", tripNumber).apply();
         Log.d(TAG, "updateTripNumber: new value:" + String.valueOf(tripNumber));
 
-        }
     }
+
+    private String calculateFuelConsumption(String readedRPM) {
+
+        double constant1 = 500;
+        double constant2 = 4;
+
+        double rpm = Double.parseDouble(readedRPM);
+
+        double fuelConsumption = rpm / constant1 + constant2;
+
+        return String.valueOf(fuelConsumption);
+    }
+
+    private void resetJsonBatch() {
+        try {
+            batchCounter = 0;
+            batch = new JSONObject("{\"data\": []}");
+        } catch (Exception e) {
+            Log.d(TAG, "resetJsonBatch: Error");
+        }
+
+    }
+
+}
 
 
 

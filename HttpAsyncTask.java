@@ -14,10 +14,12 @@ public class HttpAsyncTask extends AsyncTask<String, Void, String> {
     private ServerUploadService uploadService;
     private String jsonData;
     public static final String TAG = "CARRAMBA: HttpAsync ";
+    private OnTaskCompleted listener;
 
     HttpAsyncTask(ServerUploadService uploadService, String jsonData) {
         this.uploadService = uploadService;
         this.jsonData = jsonData;
+        this.listener=listener;
 
 
     }
@@ -39,10 +41,22 @@ public class HttpAsyncTask extends AsyncTask<String, Void, String> {
 
     }
 
-    private void sendErrorBroadcast(String errorMessage) {
+    @Override
+    protected void onPostExecute(String s){
+        sendInfoBroadcast("Server response: " + s);
+    }
+
+    public void sendErrorBroadcast(String errorMessage) {
         Intent errorIntent = new Intent("error");
         errorIntent.putExtra("error", errorMessage);
         LocalBroadcastManager.getInstance(uploadService.getContext()).sendBroadcast(errorIntent);
+
+    }
+
+    public void sendInfoBroadcast(String info) {
+        Intent infoIntent = new Intent("info");
+        infoIntent.putExtra("info", info);
+        LocalBroadcastManager.getInstance(uploadService.getContext()).sendBroadcast(infoIntent);
 
     }
 }
