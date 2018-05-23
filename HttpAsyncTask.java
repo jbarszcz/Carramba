@@ -13,22 +13,20 @@ import okhttp3.Response;
 public class HttpAsyncTask extends AsyncTask<String, Void, String> {
     private ServerUploadService uploadService;
     private String jsonData;
+    private String url;
     public static final String TAG = "CARRAMBA: HttpAsync ";
-    private OnTaskCompleted listener;
 
-    HttpAsyncTask(ServerUploadService uploadService, String jsonData) {
+    HttpAsyncTask(ServerUploadService uploadService, String jsonData, String url) {
         this.uploadService = uploadService;
         this.jsonData = jsonData;
-        this.listener=listener;
-
-
+        this.url = url;
     }
 
     @Override
     protected String doInBackground(String... params) {
         try {
             Log.d(TAG, "doInBackground: POSTING http...");
-            Response response = uploadService.postToServer(jsonData);
+            Response response = uploadService.postToServer(jsonData, url);
             Log.d(TAG, "doInBackground: HTTP " + response.toString());
             return Integer.toString(response.code());
 

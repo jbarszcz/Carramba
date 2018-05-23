@@ -25,17 +25,21 @@ import android.widget.Toast;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.Set;
 
 public class MainActivity extends AppCompatActivity {
 
     public static final String TAG = "CARRAMBA: MainActivity";
 
-    public static final String serverURL = "https://carramba-webapp-staging.herokuapp.com/api/obd";
-    //public static final String serverURL = "http://192.168.1.136:5000";
+    public static final String prodURL = "https://carramba-webapp.herokuapp.com/api/obd";
+    public static final String stagingURL = "https://carramba-webapp-staging.herokuapp.com/api/obd";
 
-    //TODO trzymac tripNumber w preferences
+    public String serverURL = "https://carramba-webapp.herokuapp.com/api/obd";
+    //public static final String serverURL = "http://192.168.1.136:5000";
+    
 
     private int tripNumber;
 
@@ -50,7 +54,6 @@ public class MainActivity extends AppCompatActivity {
     LocationManager mLocationManager;
 
     TextView connectedText;
-    TextView serverResponseText;
     TextView locationText;
     TextView speedText;
     TextView rpmText;
@@ -58,6 +61,7 @@ public class MainActivity extends AppCompatActivity {
     TextView temperatureText;
     TextView logText;
     Button mainButton;
+    Button serverButton;
 
 
     private boolean connected = false;
@@ -89,12 +93,14 @@ public class MainActivity extends AppCompatActivity {
         LocalBroadcastManager.getInstance(this).registerReceiver(locationChangedReceiver, new IntentFilter("location"));
         getApplicationContext().registerReceiver(m_gpsChangeReceiver, new IntentFilter(LocationManager.PROVIDERS_CHANGED_ACTION));
 
-        registerReceiver(disconnectedBroadcastReceiver, new IntentFilter(BluetoothDevice.ACTION_ACL_DISCONNECTED));
+        IntentFilter disconnectedFilter = new IntentFilter();
+        disconnectedFilter.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED);
+        disconnectedFilter.addAction("disconnected");
+        registerReceiver(disconnectedBroadcastReceiver, disconnectedFilter);
     }
 
     private void loadUI() {
         connectedText = (TextView) findViewById(R.id.connection_text_view);
-        serverResponseText = (TextView) findViewById(R.id.server_response_text_view);
         locationText = (TextView) findViewById(R.id.location_text_view);
         speedText = (TextView) findViewById(R.id.speed_text_view);
         rpmText = (TextView) findViewById(R.id.rpm_text_view);
@@ -107,6 +113,7 @@ public class MainActivity extends AppCompatActivity {
         logText.setMovementMethod(new ScrollingMovementMethod());
 
         mainButton = (Button) findViewById(R.id.btnMainButton);
+        serverButton = (Button) findViewById(R.id.btnServerButton);
     }
 
 
@@ -121,12 +128,12 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onReceive(Context context, Intent intent) {
 
-
             String readedSpeed = intent.getStringExtra("Vehicle Speed");
             String readedRpm = intent.getStringExtra("Engine RPM");
             String readedTemperature = intent.getStringExtra("Engine Coolant Temperature");
             String readedFuel = calculateFuelConsumption(readedRpm);
             updateData(readedSpeed, readedRpm, readedFuel, readedTemperature);
+
 
             String jsonString;
             JSONObject emptyJson;
@@ -139,8 +146,6 @@ public class MainActivity extends AppCompatActivity {
                 String longitude = locationService.getLongitude();
                 String latitude = locationService.getLatitude();
 
-                //lol, przeciez to wysyla tylko ostatni json xD
-
                 emptyJson.put("tripNumber", tripNumber);
                 emptyJson.put("longitude", Double.parseDouble(longitude));
                 emptyJson.put("latitude", Double.parseDouble(latitude));
@@ -148,10 +153,9 @@ public class MainActivity extends AppCompatActivity {
                 emptyJson.put("rpm", Integer.parseInt(readedRpm));
                 emptyJson.put("temperature", Double.parseDouble(readedTemperature));
                 emptyJson.put("fuelConsumption", Double.parseDouble(readedFuel));
-                emptyJson.put("datetime", Utils.getCurrentTimeStamp());
+                emptyJson.put("datetime", getCurrentTimeStamp());
 
                 batch.getJSONArray("data").put(emptyJson);
-
 
 
                 jsonString = batch.toString();
@@ -165,8 +169,10 @@ public class MainActivity extends AppCompatActivity {
                 }
 
 
-            } catch (JSONException e) {
+            } catch (Exception e) {
                 e.printStackTrace();
+                sendErrorBroadcast(e.getMessage());
+
             }
 
         }
@@ -177,8 +183,7 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onReceive(Context context, Intent intent) {
             String error = intent.getStringExtra("error");
-            logText.append(error + "\n");
-            logText.setText(Utils.getCurrentTimeStamp() + ": " + error + "\n" + logText.getText());
+            logText.setText(getCurrentTimeStamp() + ": " + error + "\n" + logText.getText());
 
         }
     };
@@ -188,8 +193,7 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onReceive(Context context, Intent intent) {
             String info = intent.getStringExtra("info");
-            logText.append(info + "\n");
-            logText.setText(Utils.getCurrentTimeStamp() + ": " + info);
+            logText.setText(getCurrentTimeStamp() + ": " + info + "\n" + logText.getText());
 
         }
     };
@@ -220,21 +224,23 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
-
     private final BroadcastReceiver disconnectedBroadcastReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
-            Toast connectedToast = Toast.makeText(
-                    getApplicationContext(),
-                    "Disconnected",
-                    Toast.LENGTH_SHORT
-            );
-            connectedToast.show();
-            connectedText.setText("Disconnected");
-            connectedText.setTextColor(Color.RED);
-            connected = false;
-            mainButton.setText("Choose device");
-            mainButton.setBackgroundColor(Color.WHITE);
+            Log.d(TAG, "onReceive: Received DISCONNECTED intent");
+            if (connected) {
+                Toast connectedToast = Toast.makeText(
+                        getApplicationContext(),
+                        "Disconnected",
+                        Toast.LENGTH_SHORT
+                );
+                connectedToast.show();
+                connectedText.setText("Disconnected");
+                connectedText.setTextColor(Color.RED);
+                connected = false;
+                mainButton.setText("Choose device");
+                mainButton.setBackgroundColor(Color.WHITE);
+            }
         }
     };
 
@@ -324,11 +330,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
-    //TODO stworzyc obiekt do rozmowy z obd2?
     public void updateData(String readedSpeed, String readedRPM, String fuelConsumption, String readedTemperature) {
         Log.i(TAG, "updateData: data updated");
 
-        speedText.setText("Speed: " + readedSpeed + " km//h");
+        speedText.setText("Speed: " + readedSpeed + " km/h");
         rpmText.setText("RPM " + readedRPM);
         temperatureText.setText("Engine temperature: " + readedTemperature + " C");
 
@@ -337,19 +342,26 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void uploadDataToServer(String jsonData) {
-        HttpAsyncTask asyncTask = new HttpAsyncTask(serverUploadService, jsonData);
+        HttpAsyncTask asyncTask = new HttpAsyncTask(serverUploadService, jsonData, serverURL);
         try {
             asyncTask.execute();
-//            Log.d(TAG, "uploadDataToServer: " + serverResponse);
-//            serverResponseText.setText(serverResponse);
-//            Log.d(TAG, "uploadDataToServer: Server response: " + serverResponse);
+        } catch (Exception e) {
+            sendErrorBroadcast(e.getMessage());
         }
-            catch (Exception e)
-            {
-                asyncTask.sendErrorBroadcast(e.getMessage());
-            }
+    }
+
+    public void serverButtonClicked(View view) {
+        if (serverURL.equals(prodURL)) {
+            serverURL = stagingURL;
+            serverButton.setText("STAGING");
+
+        } else {
+            serverURL = prodURL;
+            serverButton.setText("PROD");
         }
 
+        Log.d(TAG, "serverButtonClicked: SERVER URL" + serverURL);
+    }
 
     private void updateTripNumber() {
         SharedPreferences preferences = getPreferences(MODE_PRIVATE);
@@ -365,12 +377,16 @@ public class MainActivity extends AppCompatActivity {
 
         double constant1 = 500;
         double constant2 = 4;
+        try {
+            double rpm = Double.parseDouble(readedRPM);
 
-        double rpm = Double.parseDouble(readedRPM);
+            double fuelConsumption = rpm / constant1 + constant2;
 
-        double fuelConsumption = rpm / constant1 + constant2;
-
-        return String.valueOf(fuelConsumption);
+            return String.valueOf(fuelConsumption);
+        } catch (Exception e) {
+            sendErrorBroadcast(e.getMessage());
+            return "";
+        }
     }
 
     private void resetJsonBatch() {
@@ -382,6 +398,21 @@ public class MainActivity extends AppCompatActivity {
         }
 
     }
+
+    private void sendErrorBroadcast(String errorMessage) {
+        Intent errorIntent = new Intent("error");
+        errorIntent.putExtra("error", errorMessage);
+        sendBroadcast(errorIntent);
+
+    }
+
+    public static String getCurrentTimeStamp() {
+        SimpleDateFormat sdfDate = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        Date now = new Date();
+        String strDate = sdfDate.format(now);
+        return strDate;
+    }
+
 
 }
 

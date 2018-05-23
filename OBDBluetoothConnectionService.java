@@ -43,8 +43,6 @@ public class OBDBluetoothConnectionService {
     public OBDBluetoothConnectionService(Context mContext) {
         this.mContext = mContext;
         this.mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
-        //this.mBtDevice = mBluetoothAdapter.getRemoteDevice(remoteDeviceAddress);
-        // this.commandsList = new ArrayList<>();
     }
 
 
@@ -80,12 +78,13 @@ public class OBDBluetoothConnectionService {
                 btOutputStream = socket.getOutputStream();
 
                 Intent connectedIntent = new Intent("connectedToObd2");
-                //moze jednak lepiej wykorzyscac ACL_CONNECTED intent?
                 LocalBroadcastManager.getInstance(mContext).sendBroadcast(connectedIntent);
                 startOBDCommunication(socket);
                 lanuchDataGatheringLoop();
-                Log.d(TAG, "run: WYJSCIE Z PETLI!");
                 socket.close();
+                Intent disconnectedIntent = new Intent("disconnected");
+                LocalBroadcastManager.getInstance(mContext).sendBroadcast(disconnectedIntent);
+                Log.d(TAG, "run: Socket closed");
 
             } catch (IOException e) {
                 e.printStackTrace();
@@ -97,6 +96,7 @@ public class OBDBluetoothConnectionService {
         private void cancel() {
             try {
                 gatherData.set(false);
+                Log.d(TAG, "cancel: GATHER DATA" + gatherData);
             } catch (Exception e) {
                 sendErrorBroadcast(e.getMessage());
                 e.printStackTrace();
@@ -105,19 +105,11 @@ public class OBDBluetoothConnectionService {
     }
 
     private void startOBDCommunication(BluetoothSocket socket) {
-        // TODO
-        // dodatkowo obsłużyć wyjątek, eby nie kładło całego programu
-        // może próbować np 10 razy odpalić komende jesli sie nie udalo
-        // dodać przycisk do konczenia polaczenia z obd2 i najlepiej by bylo wyswietlac gdzies odpowiedzi (/zrobic jakies logowanie w samej apce, zeby tylko dodawalo odpowiedzi)
-
-
-        //init bus
 
         executeInitBus(socket);
 
         SpeedCommand speedCommand = new SpeedCommand();
         RPMCommand rpmCommand = new RPMCommand();
-        ConsumptionRateCommand consumptionRateCommmand = new ConsumptionRateCommand();
         EngineCoolantTemperatureCommand engineCoolantTemperatureCommand = new EngineCoolantTemperatureCommand();
 
         commandsList = new ArrayList<>();
@@ -142,12 +134,13 @@ public class OBDBluetoothConnectionService {
         } catch (Exception e) {
             e.printStackTrace();
             sendErrorBroadcast(e.getMessage());
-            Log.e(TAG, "Couldnt run commands: " + e.getMessage());
+            Log.e(TAG, "Couldn't run commands: " + e.getMessage());
         }
     }
 
     private void lanuchDataGatheringLoop() {
         while (gatherData.get()) {
+            System.out.println(gatherData.get());
             try {
                 Thread.sleep(500);
             } catch (Exception e) {
@@ -160,16 +153,18 @@ public class OBDBluetoothConnectionService {
                     command.run(btInputStream, btOutputStream);
                     String commandResult = command.getCalculatedResult();
                     dataReadedIntent.putExtra(command.getName(), commandResult);
+                } catch (java.io.IOException e) {
+                    sendErrorBroadcast(e.getMessage());
+                    this.stopConnection();
+
                 } catch (Exception e) {
                     e.printStackTrace();
-                    Log.e(TAG, "startOBDCommunication: Wyjatek w FOR" + e.getMessage());
+                    Log.e(TAG, "startOBDCommunication: Exception with OBD Commands" + e.getMessage());
                     dataReadedIntent.putExtra(command.getName(), " - ");
                     sendErrorBroadcast(e.getMessage());
                 }
 
             }
-
-            //poszaleć z multiple commands?
 
             LocalBroadcastManager.getInstance(mContext).sendBroadcast(dataReadedIntent);
 
