@@ -27,7 +27,7 @@ class ServerUploadService {
         url = serverUrl;
     }
 
-    Response postToServer(String json) throws IOException {
+    Response postToServer(String json, String url) throws IOException {
 
         RequestBody requestBody = RequestBody.create(JSON, json);
         Request request = new Request.Builder()
